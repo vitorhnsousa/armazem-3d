@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visualizador 3D & 2D de Armazém Logístico</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#f0f9ff',
+                            100: '#e0f2fe',
+                            500: '#0ea5e9',
+                            600: '#0284c7',
+                            800: '#075985',
+                            900: '#0c4a6e',
+                        },
+                        zone: {
+                            a: '#ef4444', // Red - High turnover
+                            b: '#eab308', // Yellow - Leakage / Chemical
+                            c: '#22c55e', // Green - Expiration
+                            d: '#f97316', // Orange - Fragile
+                            e: '#3b82f6', // Blue - General / Bulky
+                            rec: '#64748b' // Gray - Receiving/Shipping
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    
+    <!-- Three.js and OrbitControls -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+            overflow-x: hidden;
+        }
+        .mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1e293b;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
+        #canvas3d {
+            width: 100%;
+            height: 100%;
+            outline: none;
+        }
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.75);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col antialiased selection:bg-brand-500 selection:text-white">
+
+    <!-- HEADER / NAVBAR -->
+    <header class="glass-panel sticky top-0 z-50 border-b border-slate-800 px-6 py-3 flex flex-wrap justify-between items-center gap-4">
+        <div class="flex items-center gap-3">
+            <div class="bg-gradient-to-tr from-brand-600 to-indigo-500 p-2.5 rounded-xl shadow-lg shadow-brand-500/20">
+                <i class="fa-solid fa-boxes-packing text-xl text-white"></i>
+            </div>
+            <div>
+                <h1 class="text-lg font-bold text-white tracking-wide">3D Warehouse Planner & WMS</h1>
+                <p class="text-xs text-slate-400">Dimensionamento e Endereçamento Logístico (20m × 12m)</p>
+            </div>
+        </div>
+
+        <!-- QUICK STATS HEADER -->
+        <div class="flex items-center gap-6 text-xs">
+            <div class="hidden sm:flex flex-col text-right">
+                <span class="text-slate-400">Dimensões Totais</span>
+                <span class="font-semibold text-slate-200">20.0m × 12.0m × 5.0m</span>
+            </div>
+            <div class="hidden md:flex flex-col text-right">
+                <span class="text-slate-400">Área Útil</span>
+                <span class="font-semibold text-emerald-400">240 m²</span>
+            </div>
+            <div class="hidden lg:flex flex-col text-right">
+                <span class="text-slate-400">Módulos de Estantes</span>
+                <span class="font-semibold text-brand-400">11 Módulos (110 Posições)</span>
+            </div>
+            <button id="btn-toggle-view" onclick="switchMainTab('3d')" class="px-4 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-lg font-medium transition flex items-center gap-2 shadow-lg shadow-brand-600/30">
+                <i class="fa-solid fa-cube"></i> Visualização 3D
+            </button>
+        </div>
+    </header>
+
+    <!-- MAIN CONTENT CONTAINER -->
+    <main class="flex-1 p-4 md:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-[1800px] w-full mx-auto">
+
+        <!-- LEFT/TOP: KPI & NAVIGATION BAR -->
+        <div class="lg:col-span-12 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-4">
+            <div class="glass-panel p-4 rounded-xl flex items-center justify-between border-l-4 border-emerald-500">
+                <div>
+                    <p class="text-xs text-slate-400 font-medium">Área Total</p>
+                    <p class="text-xl font-bold text-white mt-1">240 <span class="text-xs font-normal text-slate-400">m²</span></p>
+                </div>
+                <i class="fa-solid fa-ruler-combined text-2xl text-emerald-500/40"></i>
+            </div>
+            <div class="glass-panel p-4 rounded-xl flex items-center justify-between border-l-4 border-brand-500">
+                <div>
+                    <p class="text-xs text-slate-400 font-medium">Capacidade Posições</p>
+                    <p class="text-xl font-bold text-white mt-1">110 <span class="text-xs font-normal text-slate-400">paletes/caixas</span></p>
+                </div>
+                <i class="fa-solid fa-cubes text-2xl text-brand-500/40"></i>
+            </div>
+            <div class="glass-panel p-4 rounded-xl flex items-center justify-between border-l-4 border-purple-500">
+                <div>
+                    <p class="text-xs text-slate-400 font-medium">Itens em Estoque</p>
+                    <p class="text-xl font-bold text-white mt-1">2.710 <span class="text-xs font-normal text-slate-400">unid.</span></p>
+                </div>
+                <i class="fa-solid fa-box text-2xl text-purple-500/40"></i>
+            </div>
+            <div class="glass-panel p-4 rounded-xl flex items-center justify-between border-l-4 border-amber-500">
+                <div>
+                    <p class="text-xs text-slate-400 font-medium">Capacidade Requerida</p>
+                    <p class="text-xl font-bold text-white mt-1">3.252 <span class="text-xs font-normal text-slate-400">(Fator +20%)</span></p>
+                </div>
+                <i class="fa-solid fa-chart-line text-2xl text-amber-500/40"></i>
+            </div>
+            <div class="glass-panel p-4 rounded-xl col-span-2 sm:col-span-4 lg:col-span-1 flex items-center justify-between border-l-4 border-cyan-500">
+                <div>
+                    <p class="text-xs text-slate-400 font-medium">Taxa de Ocupação</p>
+                    <p class="text-xl font-bold text-cyan-400 mt-1">82.4%</p>
+                </div>
+                <i class="fa-solid fa-pie-chart text-2xl text-cyan-500/40"></i>
+            </div>
+        </div>
+
+        <!-- CENTER: VISUALIZERS (3D / 2D) -->
+        <div class="lg:col-span-8 flex flex-col gap-4">
+            
+            <!-- TABS FOR VIEWS -->
+            <div class="glass-panel p-1.5 rounded-xl flex items-center gap-2 w-fit">
+                <button id="tab-3d-btn" onclick="switchMainTab('3d')" class="px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 bg-brand-600 text-white transition">
+                    <i class="fa-solid fa-cube"></i> Modelo 3D Interativo
+                </button>
+                <button id="tab-2d-btn" onclick="switchMainTab('2d')" class="px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 text-slate-400 hover:text-white transition">
+                    <i class="fa-solid fa-map"></i> Esboço Planta Baixa (2D)
+                </button>
+            </div>
+
+            <!-- 3D VIEWPORT CONTAINER -->
+            <div id="container-3d" class="glass-panel rounded-2xl overflow-hidden relative h-[580px] border border-slate-800 shadow-2xl">
+                <!-- 3D CANVAS -->
+                <canvas id="canvas3d"></canvas>
+
+                <!-- OVERLAY CONTROLS -->
+                <div class="absolute top-4 left-4 z-10 flex flex-col gap-2">
+                    <div class="glass-panel p-2 rounded-xl flex flex-col gap-1 text-xs">
+                        <span class="text-[10px] text-slate-400 font-semibold px-2 py-0.5">CÂMERA</span>
+                        <button onclick="setCameraView('iso')" class="px-2.5 py-1.5 bg-slate-800/80 hover:bg-slate-700 rounded-lg text-left text-slate-200 transition flex items-center gap-2">
+                            <i class="fa-solid fa-arrows-to-eye text-brand-400"></i> Isométrica
+                        </button>
+                        <button onclick="setCameraView('top')" class="px-2.5 py-1.5 bg-slate-800/80 hover:bg-slate-700 rounded-lg text-left text-slate-200 transition flex items-center gap-2">
+                            <i class="fa-solid fa-border-all text-emerald-400"></i> Planta Superior
+                        </button>
+                        <button onclick="setCameraView('front')" class="px-2.5 py-1.5 bg-slate-800/80 hover:bg-slate-700 rounded-lg text-left text-slate-200 transition flex items-center gap-2">
+                            <i class="fa-solid fa-door-open text-amber-400"></i> Visão Entrada
+                        </button>
+                    </div>
+
+                    <div class="glass-panel p-2 rounded-xl flex flex-col gap-1 text-xs">
+                        <span class="text-[10px] text-slate-400 font-semibold px-2 py-0.5">ILUMINAÇÃO</span>
+                        <button id="btn-night-mode" onclick="toggleNightMode()" class="px-2.5 py-1.5 bg-slate-800/80 hover:bg-slate-700 rounded-lg text-left text-slate-200 transition flex items-center gap-2">
+                            <i class="fa-solid fa-moon text-indigo-400"></i> Alternar Luz
+                        </button>
+                    </div>
+                </div>
+
+                <!-- ZONE FILTER TOOLBAR -->
+                <div class="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 glass-panel px-4 py-2 rounded-2xl flex items-center gap-2 flex-wrap justify-center border border-slate-700/50 shadow-xl">
+                    <span class="text-xs font-semibold text-slate-400 mr-2 hidden sm:inline">Regiões:</span>
+                    <button onclick="filter3DZone('all')" class="zone-btn px-3 py-1 rounded-lg text-xs font-medium bg-slate-700 text-white border border-slate-600 transition">Todas</button>
+                    <button onclick="filter3DZone('A')" class="zone-btn px-3 py-1 rounded-lg text-xs font-medium bg-red-500/20 text-red-300 border border-red-500/40 hover:bg-red-500/30 transition">A - Alto Giro</button>
+                    <button onclick="filter3DZone('B')" class="zone-btn px-3 py-1 rounded-lg text-xs font-medium bg-yellow-500/20 text-yellow-300 border border-yellow-500/40 hover:bg-yellow-500/30 transition">B - Vazamento</button>
+                    <button onclick="filter3DZone('C')" class="zone-btn px-3 py-1 rounded-lg text-xs font-medium bg-green-500/20 text-green-300 border border-green-500/40 hover:bg-green-500/30 transition">C - Validade</button>
+                    <button onclick="filter3DZone('D')" class="zone-btn px-3 py-1 rounded-lg text-xs font-medium bg-orange-500/20 text-orange-300 border border-orange-500/40 hover:bg-orange-500/30 transition">D - Frágil</button>
+                    <button onclick="filter3DZone('E')" class="zone-btn px-3 py-1 rounded-lg text-xs font-medium bg-blue-500/20 text-blue-300 border border-blue-500/40 hover:bg-blue-500/30 transition">E - Geral/Volumosos</button>
+                </div>
+
+                <!-- 3D INSTRUCTION HINT -->
+                <div class="absolute top-4 right-4 z-10 glass-panel px-3 py-1.5 rounded-lg text-[11px] text-slate-400 flex items-center gap-2 pointer-events-none">
+                    <i class="fa-solid fa-hand-pointer text-brand-400"></i> Clique na estante para ver detalhes
+                </div>
+            </div>
+
+            <!-- 2D FLOORPLAN CONTAINER (HIDDEN BY DEFAULT) -->
+            <div id="container-2d" class="glass-panel rounded-2xl p-6 hidden flex-col gap-4 min-h-[580px]">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <h3 class="text-base font-bold text-white flex items-center gap-2">
+                            <i class="fa-solid fa-map-location-dot text-brand-400"></i> Esboço Arquitetônico & Circulação 2D
+                        </h3>
+                        <p class="text-xs text-slate-400">Layout dimensional cotado (20.00m × 12.00m)</p>
+                    </div>
+                    <div class="flex items-center gap-4 text-xs">
+                        <div class="flex items-center gap-2"><span class="w-3 h-3 rounded bg-red-500"></span> Regiã A</div>
+                        <div class="flex items-center gap-2"><span class="w-3 h-3 rounded bg-yellow-500"></span> Região B</div>
+                        <div class="flex items-center gap-2"><span class="w-3 h-3 rounded bg-green-500"></span> Região C</div>
+                        <div class="flex items-center gap-2"><span class="w-3 h-3 rounded bg-orange-500"></span> Região D</div>
+                        <div class="flex items-center gap-2"><span class="w-3 h-3 rounded bg-blue-500"></span> Região E</div>
+                    </div>
+                </div>
+
+                <!-- 2D SVG MAP -->
+                <div class="relative w-full flex-1 bg-slate-950 rounded-xl p-4 border border-slate-800 flex items-center justify-center overflow-auto">
+                    <svg id="svg-floorplan" viewBox="0 0 2200 1400" class="w-full h-auto max-h-[480px]">
+                        <!-- GRID BACKGROUND -->
+                        <defs>
+                            <pattern id="grid" width="100" height="100" patternUnits="userSpaceOnUse">
+                                <path d="M 100 0 L 0 0 0 100" fill="none" stroke="#1e293b" stroke-width="2"/>
+                            </pattern>
+                        </defs>
+                        <rect width="2200" height="1400" fill="#090d16"/>
+                        
+                        <!-- OUTSIDE BOUNDARY (20m x 12m) -->
+                        <g transform="translate(100, 100)">
+                            <!-- WAREHOUSE FLOOR -->
+                            <rect x="0" y="0" width="2000" height="1200" fill="url(#grid)" stroke="#475569" stroke-width="8" rx="8"/>
+
+                            <!-- CORRIDOR LABELS -->
+                            <text x="1000" y="280" fill="#64748b" font-size="28" font-weight="bold" text-anchor="middle">CORREDOR PRINCIPAL DE CIRCULAÇÃO (2.50m)</text>
+                            <text x="1000" y="780" fill="#64748b" font-size="28" font-weight="bold" text-anchor="middle">CORREDOR INTERMEDIÁRIO DE APROVISIONAMENTO (2.00m)</text>
+
+                            <!-- RECEIVING & EXPEDITION ZONE -->
+                            <rect x="600" y="20" width="800" height="380" fill="#334155" fill-opacity="0.3" stroke="#64748b" stroke-width="3" stroke-dasharray="10 5" rx="6"/>
+                            <text x="1000" y="200" fill="#94a3b8" font-size="32" font-weight="bold" text-anchor="middle">ÁREA DE RECEBIMENTO, CONFERÊNCIA E EXPEDIÇÃO</text>
+
+                            <!-- REGION A - ALTO GIRO -->
+                            <rect x="150" y="50" width="350" height="400" fill="#ef4444" fill-opacity="0.15" stroke="#ef4444" stroke-width="3" rx="6"/>
+                            <text x="325" y="90" fill="#ef4444" font-size="28" font-weight="bold" text-anchor="middle">REGIÃO A (Alto Giro)</text>
+
+                            <!-- Estantes Região A -->
+                            <g class="cursor-pointer" onclick="selectModule('A01')">
+                                <rect x="200" y="120" width="120" height="280" fill="#ef4444" stroke="#f87171" stroke-width="3" rx="4"/>
+                                <text x="260" y="270" fill="#ffffff" font-size="24" font-weight="bold" text-anchor="middle">A01</text>
+                            </g>
+                            <g class="cursor-pointer" onclick="selectModule('A02')">
+                                <rect x="350" y="120" width="120" height="280" fill="#ef4444" stroke="#f87171" stroke-width="3" rx="4"/>
+                                <text x="410" y="270" fill="#ffffff" font-size="24" font-weight="bold" text-anchor="middle">A02</text>
+                            </g>
+
+                            <!-- REGION B - VAZAMENTO -->
+                            <rect x="1500" y="50" width="350" height="400" fill="#eab308" fill-opacity="0.15" stroke="#eab308" stroke-width="3" rx="6"/>
+                            <text x="1675" y="90" fill="#eab308" font-size="28" font-weight="bold" text-anchor="middle">REGIÃO B (Vazamento)</text>
+
+                            <g class="cursor-pointer" onclick="selectModule('B01')">
+                                <rect x="1550" y="120" width="120" height="280" fill="#eab308" stroke="#fde047" stroke-width="3" rx="4"/>
+                                <text x="1610" y="270" fill="#ffffff" font-size="24" font-weight="bold" text-anchor="middle">B01</text>
+                            </g>
+                            <g class="cursor-pointer" onclick="selectModule('B02')">
+                                <rect x="1700" y="120" width="120" height="280" fill="#eab308" stroke="#fde047" stroke-width="3" rx="4"/>
+                                <text x="1760" y="270" fill="#ffffff" font-size="24" font-weight="bold" text-anchor="middle">B02</text>
+                            </g>
+
+                            <!-- REGION C - VALIDADE -->
+                            <rect x="150" y="550" width="350" height="400" fill="#22c55e" fill-opacity="0.15" stroke="#22c55e" stroke-width="3" rx="6"/>
+                            <text x="325" y="590" fill="#22c55e" font-size="28" font-weight="bold" text-anchor="middle">REGIÃO C (Validade)</text>
+
+                            <g class="cursor-pointer" onclick="selectModule('C01')">
+                                <rect x="200" y="620" width="120" height="280" fill="#22c55e" stroke="#4ade80" stroke-width="3" rx="4"/>
+                                <text x="260" y="770" fill="#ffffff" font-size="24" font-weight="bold" text-anchor="middle">C01</text>
+                            </g>
+                            <g class="cursor-pointer" onclick="selectModule('C02')">
+                                <rect x="350" y="620" width="120" height="280" fill="#22c55e" stroke="#4ade80" stroke-width="3" rx="4"/>
+                                <text x="410" y="770" fill="#ffffff" font-size="24" font-weight="bold" text-anchor="middle">C02</text>
+                            </g>
+
+                            <!-- REGION D - FRÁGIL -->
+                            <rect x="1500" y="550" width="350" height="400" fill="#f97316" fill-opacity="0.15" stroke="#f97316" stroke-width="3" rx="6"/>
+                            <text x="1675" y="590" fill="#f97316" font-size="28" font-weight="bold" text-anchor="middle">REGIÃO D (Frágil)</text>
+
+                            <g class="cursor-pointer" onclick="selectModule('D01')">
+                                <rect x="1625" y="620" width="120" height="280" fill="#f97316" stroke="#fb923c" stroke-width="3" rx="4"/>
+                                <text x="1685" y="770" fill="#ffffff" font-size="24" font-weight="bold" text-anchor="middle">D01</text>
+                            </g>
+
+                            <!-- REGION E - GERAL & VOLUMOSOS -->
+                            <rect x="150" y="1000" width="1700" height="170" fill="#3b82f6" fill-opacity="0.15" stroke="#3b82f6" stroke-width="3" rx="6"/>
+                            <text x="1000" y="1035" fill="#3b82f6" font-size="26" font-weight="bold" text-anchor="middle">REGIÃO E (Médio/Baixo Giro & Volumosos)</text>
+
+                            <g class="cursor-pointer" onclick="selectModule('E01')">
+                                <rect x="200" y="1055" width="300" height="100" fill="#3b82f6" stroke="#60a5fa" stroke-width="3" rx="4"/>
+                                <text x="350" y="1115" fill="#ffffff" font-size="24" font-weight="bold" text-anchor="middle">E01</text>
+                            </g>
+                            <g class="cursor-pointer" onclick="selectModule('E02')">
+                                <rect x="600" y="1055" width="300" height="100" fill="#3b82f6" stroke="#60a5fa" stroke-width="3" rx="4"/>
+                                <text x="750" y="1115" fill="#ffffff" font-size="24" font-weight="bold" text-anchor="middle">E02</text>
+                            </g>
+                            <g class="cursor-pointer" onclick="selectModule('E03')">
+                                <rect x="1000" y="1055" width="300" height="100" fill="#3b82f6" stroke="#60a5fa" stroke-width="3" rx="4"/>
+                                <text x="1150" y="1115" fill="#ffffff" font-size="24" font-weight="bold" text-anchor="middle">E03</text>
+                            </g>
+                            <g class="cursor-pointer" onclick="selectModule('E04')">
+                                <rect x="1400" y="1055" width="300" height="100" fill="#3b82f6" stroke="#60a5fa" stroke-width="3" rx="4"/>
+                                <text x="1550" y="1115" fill="#ffffff" font-size="24" font-weight="bold" text-anchor="middle">E04</text>
+                            </g>
+
+                            <!-- MAIN ENTRANCE PORTAL -->
+                            <rect x="800" y="-15" width="400" height="20" fill="#22c55e" rx="3"/>
+                            <text x="1000" y="-30" fill="#22c55e" font-size="28" font-weight="bold" text-anchor="middle">PORTÃO DE CARGA / Acesso Principal (4.0m)</text>
+
+                            <!-- DIMENSIONS ANNOTATIONS -->
+                            <line x1="0" y1="1230" x2="2000" y2="1230" stroke="#94a3b8" stroke-width="3"/>
+                            <text x="1000" y="1270" fill="#94a3b8" font-size="32" font-weight="bold" text-anchor="middle">COMPRIMENTO TOTAL: 20.00 M</text>
+
+                            <line x1="-30" y1="0" x2="-30" y2="1200" stroke="#94a3b8" stroke-width="3"/>
+                            <text x="-60" y="600" fill="#94a3b8" font-size="32" font-weight="bold" text-anchor="middle" transform="rotate(-90, -60, 600)">LARGURA TOTAL: 12.00 M</text>
+                        </g>
+                    </svg>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- RIGHT: RACK INSPECTOR PANEL -->
+        <div class="lg:col-span-4 flex flex-col gap-4">
+            
+            <div id="inspector-card" class="glass-panel p-5 rounded-2xl border border-slate-800 flex flex-col gap-4 h-full">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-circle-info text-brand-400"></i>
+                        <h3 class="font-bold text-white text-base">Inspetor de Módulo 3D</h3>
+                    </div>
+                    <span id="selected-module-badge" class="px-2.5 py-1 bg-brand-500/20 text-brand-300 border border-brand-500/30 rounded-lg text-xs font-mono font-bold">
+                        A01
+                    </span>
+                </div>
+
+                <div id="inspector-content" class="flex flex-col gap-4 text-xs">
+                    <!-- Dynamic Details Injected Here -->
+                    <div class="p-4 bg-slate-900/60 rounded-xl border border-slate-800 flex flex-col gap-2">
+                        <div class="flex justify-between text-slate-400">
+                            <span>Região Vinculada:</span>
+                            <span id="insp-region" class="font-bold text-red-400">Região A - Alto Giro</span>
+                        </div>
+                        <div class="flex justify-between text-slate-400">
+                            <span>Dimensão Módulo:</span>
+                            <span class="font-mono text-slate-200">1.20m × 0.60m × 3.60m</span>
+                        </div>
+                        <div class="flex justify-between text-slate-400">
+                            <span>Capacidade Física:</span>
+                            <span class="font-bold text-slate-200">10 Posições (5 Níveis)</span>
+                        </div>
+                    </div>
+
+                    <h4 class="font-semibold text-slate-300 mt-2 flex items-center gap-2">
+                        <i class="fa-solid fa-boxes-stacked text-amber-400"></i> Produtos Armazenados no Módulo:
+                    </h4>
+
+                    <div id="insp-products-list" class="flex flex-col gap-2 max-h-[380px] overflow-y-auto pr-1">
+                        <!-- Loaded dynamically -->
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- BOTTOM FULL-WIDTH: INVENTORY & ADDRESS TABLE -->
+        <div class="lg:col-span-12 glass-panel p-6 rounded-2xl border border-slate-800 flex flex-col gap-4">
+            
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+                <div>
+                    <h2 class="text-lg font-bold text-white flex items-center gap-2">
+                        <i class="fa-solid fa-table-list text-brand-400"></i> Tabela de Produtos & Endereçamento de Estoque
+                    </h2>
+                    <p class="text-xs text-slate-400">Fator de Capacidade Necessária = Estoque Atual × 1,20 (Reserva de Segurança)</p>
+                </div>
+
+                <!-- CONTROLS & FILTERS -->
+                <div class="flex flex-wrap items-center gap-3">
+                    <div class="relative">
+                        <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+                        <input type="text" id="table-search" oninput="renderTable()" placeholder="Buscar produto ou código..." class="pl-9 pr-4 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-brand-500 w-48 sm:w-64">
+                    </div>
+
+                    <select id="filter-region" onchange="renderTable()" class="px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-brand-500">
+                        <option value="all">Todas as Regiões</option>
+                        <option value="A">Região A (Alto Giro)</option>
+                        <option value="B">Região B (Vazamento)</option>
+                        <option value="C">Região C (Validade)</option>
+                        <option value="D">Região D (Frágil)</option>
+                        <option value="E">Região E (Geral / Volumosos)</option>
+                    </select>
+
+                    <select id="filter-feature" onchange="renderTable()" class="px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-brand-500">
+                        <option value="all">Todas as Características</option>
+                        <option value="Alto giro">Alto Giro</option>
+                        <option value="Médio giro">Médio Giro</option>
+                        <option value="Baixo giro">Baixo Giro</option>
+                        <option value="Validade">Validade</option>
+                        <option value="Pode vazar">Pode Vazar / Químico</option>
+                        <option value="Volumoso">Volumoso</option>
+                        <option value="Frágil">Frágil</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- TABLE -->
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs border-collapse">
+                    <thead>
+                        <tr class="bg-slate-900/80 text-slate-400 border-b border-slate-800 font-semibold uppercase tracking-wider">
+                            <th class="p-3">Código</th>
+                            <th class="p-3">Produto</th>
+                            <th class="p-3">Característica</th>
+                            <th class="p-3 text-right">Qtd. Estoque</th>
+                            <th class="p-3 text-right">Capacidade Req. (+20%)</th>
+                            <th class="p-3 text-center">Região Alocada</th>
+                            <th class="p-3">Endereço de Estoque Sugerido</th>
+                            <th class="p-3 text-center">Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody id="inventory-tbody" class="divide-y divide-slate-800/60 font-medium">
+                        <!-- Injected via JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="flex justify-between items-center text-xs text-slate-400 pt-2">
+                <span id="table-count-info">Exibindo 24 de 24 produtos</span>
+                <span class="mono">Formato de Endereço: [Região][Módulo]-[Nível]-[Posição]</span>
+            </div>
+
+        </div>
+
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="glass-panel border-t border-slate-800 py-4 px-6 text-center text-xs text-slate-500 mt-6">
+        Sistema de Dimensionamento e Gestão de Armazém Logístico &copy; 2026 - Desenvolvido para Simulação 3D/2D
+    </footer>
+
+    <!-- SCRIPT DATA & THREE.JS LOGIC -->
+    <script>
+        // ==============================================================================
+        // 1. DATASET COMPLETO DOS PRODUTOS (PDF ORIGINAL)
+        // ==============================================================================
+        const productsData = [
+            { code: "P001", name: "Arroz 5 kg", stock: 180, feature: "Alto giro", region: "A", address: "A01-1-1 a A01-3-2", module: "A01" },
+            { code: "P002", name: "Feijão 1 kg", stock: 240, feature: "Alto giro", region: "A", address: "A01-4-1 a A02-1-2", module: "A01" },
+            { code: "P003", name: "Açúcar 5 kg", stock: 150, feature: "Alto giro", region: "A", address: "A02-2-1 a A02-3-2", module: "A02" },
+            { code: "P004", name: "Café 500 g", stock: 120, feature: "Alto giro", region: "A", address: "A02-4-1 a A02-5-2", module: "A02" },
+            { code: "P005", name: "Macarrão 500 g", stock: 200, feature: "Médio giro", region: "E", address: "E01-1-1 a E01-3-1", module: "E01" },
+            { code: "P006", name: "Farinha de trigo 1 kg", stock: 160, feature: "Médio giro", region: "E", address: "E01-3-2 a E01-5-1", module: "E01" },
+            { code: "P007", name: "Sal 1 kg", stock: 100, feature: "Médio giro", region: "E", address: "E01-5-2 a E02-1-2", module: "E01" },
+            { code: "P008", name: "Biscoito sortido", stock: 140, feature: "Validade", region: "C", address: "C01-1-1 a C01-2-2", module: "C01" },
+            { code: "P009", name: "Leite em pó", stock: 80, feature: "Validade", region: "C", address: "C01-3-1 a C01-4-1", module: "C01" },
+            { code: "P010", name: "Molho de tomate", stock: 120, feature: "Validade", region: "C", address: "C01-4-2 a C02-1-1", module: "C01" },
+            { code: "P011", name: "Óleo de cozinha", stock: 160, feature: "Pode vazar", region: "B", address: "B01-1-1 a B01-2-2", module: "B01" },
+            { code: "P012", name: "Detergente líquido", stock: 100, feature: "Pode vazar", region: "B", address: "B01-3-1 a B01-4-1", module: "B01" },
+            { code: "P013", name: "Água sanitária", stock: 80, feature: "Pode vazar", region: "B", address: "B01-4-2 a B01-5-2", module: "B01" },
+            { code: "P014", name: "Amaciante", stock: 90, feature: "Pode vazar", region: "B", address: "B02-1-1 a B02-2-1", module: "B02" },
+            { code: "P015", name: "Papel higiênico", stock: 100, feature: "Volumoso", region: "E", address: "E02-2-2 a E02-4-1", module: "E02" },
+            { code: "P016", name: "Papel toalha", stock: 80, feature: "Volumoso", region: "E", address: "E02-4-2 a E03-1-1", module: "E02" },
+            { code: "P017", name: "Sacos para lixo", stock: 120, feature: "Volumoso", region: "E", address: "E03-1-2 a E03-3-1", module: "E03" },
+            { code: "P018", name: "Esponjas", stock: 70, feature: "Baixo giro", region: "E", address: "E03-3-2 a E03-4-2", module: "E03" },
+            { code: "P019", name: "Produtos de limpeza em pó", stock: 90, feature: "Baixo giro", region: "E", address: "E03-5-1 a E04-1-2", module: "E03" },
+            { code: "P020", name: "Pilhas", stock: 60, feature: "Baixo giro", region: "E", address: "E04-2-1 a E04-2-2", module: "E04" },
+            { code: "P021", name: "Lâmpadas LED", stock: 80, feature: "Frágil", region: "D", address: "D01-1-1 a D01-2-2", module: "D01" },
+            { code: "P022", name: "Copos descartáveis", stock: 100, feature: "Volumoso", region: "E", address: "E04-3-1 a E04-4-1", module: "E04" },
+            { code: "P023", name: "Guardanapos", stock: 120, feature: "Volumoso", region: "E", address: "E04-4-2 a E04-5-2", module: "E04" },
+            { code: "P024", name: "Temperos diversos", stock: 80, feature: "Validade", region: "C", address: "C02-1-2 a C02-2-2", module: "C02" }
+        ];
+
+        // Modules coordinates in 3D Space (X, Z) - Warehouse is 20m (X) x 12m (Z)
+        const modulesConfig = [
+            { id: "A01", region: "A", x: 2.5, z: 2.0, rot: 0 },
+            { id: "A02", region: "A", x: 4.0, z: 2.0, rot: 0 },
+            { id: "B01", region: "B", x: 16.0, z: 2.0, rot: 0 },
+            { id: "B02", region: "B", x: 17.5, z: 2.0, rot: 0 },
+            { id: "C01", region: "C", x: 2.5, z: 7.0, rot: 0 },
+            { id: "C02", region: "C", x: 4.0, z: 7.0, rot: 0 },
+            { id: "D01", region: "D", x: 16.5, z: 7.0, rot: 0 },
+            { id: "E01", region: "E", x: 3.0, z: 10.5, rot: Math.PI / 2 },
+            { id: "E02", region: "E", x: 7.0, z: 10.5, rot: Math.PI / 2 },
+            { id: "E03", region: "E", x: 11.0, z: 10.5, rot: Math.PI / 2 },
+            { id: "E04", region: "E", x: 15.0, z: 10.5, rot: Math.PI / 2 },
+        ];
+
+        // Colors per Region
+        const regionColors = {
+            A: 0xef4444, // Red
+            B: 0xeab308, // Yellow
+            C: 0x22c55e, // Green
+            D: 0xf97316, // Orange
+            E: 0x3b82f6, // Blue
+            REC: 0x64748b // Gray
+        };
+
+        // ==============================================================================
+        // 2. RENDER TABLE & INTERACTIVE UI LOGIC
+        // ==============================================================================
+        function renderTable() {
+            const tbody = document.getElementById("inventory-tbody");
+            const search = document.getElementById("table-search").value.toLowerCase();
+            const regFilter = document.getElementById("filter-region").value;
+            const featFilter = document.getElementById("filter-feature").value;
+
+            tbody.innerHTML = "";
+
+            const filtered = productsData.filter(item => {
+                const matchesSearch = item.code.toLowerCase().includes(search) || item.name.toLowerCase().includes(search);
+                const matchesRegion = regFilter === "all" || item.region === regFilter;
+                const matchesFeat = featFilter === "all" || item.feature === featFilter;
+                return matchesSearch && matchesRegion && matchesFeat;
+            });
+
+            filtered.forEach(p => {
+                const reqCap = Math.round(p.stock * 1.20);
+                
+                let regionBadgeClass = "";
+                switch(p.region) {
+                    case 'A': regionBadgeClass = "bg-red-500/20 text-red-400 border-red-500/30"; break;
+                    case 'B': regionBadgeClass = "bg-yellow-500/20 text-yellow-400 border-yellow-500/30"; break;
+                    case 'C': regionBadgeClass = "bg-green-500/20 text-green-400 border-green-500/30"; break;
+                    case 'D': regionBadgeClass = "bg-orange-500/20 text-orange-400 border-orange-500/30"; break;
+                    case 'E': regionBadgeClass = "bg-blue-500/20 text-blue-400 border-blue-500/30"; break;
+                }
+
+                const tr = document.createElement("tr");
+                tr.className = "hover:bg-slate-800/40 transition cursor-pointer";
+                tr.onclick = () => selectModule(p.module);
+                tr.innerHTML = `
+                    <td class="p-3 mono font-bold text-brand-400">${p.code}</td>
+                    <td class="p-3 font-semibold text-slate-200">${p.name}</td>
+                    <td class="p-3 text-slate-400">${p.feature}</td>
+                    <td class="p-3 text-right mono text-slate-300">${p.stock}</td>
+                    <td class="p-3 text-right mono font-bold text-emerald-400">${reqCap}</td>
+                    <td class="p-3 text-center">
+                        <span class="px-2 py-0.5 rounded text-[10px] font-bold border ${regionBadgeClass}">
+                            Região ${p.region}
+                        </span>
+                    </td>
+                    <td class="p-3 mono text-xs text-amber-300">${p.address}</td>
+                    <td class="p-3 text-center">
+                        <button onclick="event.stopPropagation(); selectModule('${p.module}')" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700 transition">
+                            <i class="fa-solid fa-location-dot text-brand-400"></i> Ver
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            document.getElementById("table-count-info").innerText = `Exibindo ${filtered.length} de ${productsData.length} produtos`;
+        }
+
+        function selectModule(modId) {
+            document.getElementById("selected-module-badge").innerText = modId;
+            const modInfo = modulesConfig.find(m => m.id === modId);
+            const prods = productsData.filter(p => p.module === modId);
+
+            const regionNames = {
+                A: "Região A - Alto Giro",
+                B: "Região B - Possibilidade de Vazamento",
+                C: "Região C - Controle de Validade",
+                D: "Região D - Produtos Frágeis",
+                E: "Região E - Médio/Baixo Giro e Volumosos"
+            };
+
+            document.getElementById("insp-region").innerText = regionNames[modInfo.region];
+
+            const listContainer = document.getElementById("insp-products-list");
+            listContainer.innerHTML = "";
+
+            if (prods.length === 0) {
+                listContainer.innerHTML = `<div class="p-3 text-slate-500 italic text-center">Nenhum produto atribuído diretamente neste módulo.</div>`;
+            } else {
+                prods.forEach(p => {
+                    const card = document.createElement("div");
+                    card.className = "p-3 bg-slate-900 border border-slate-800 rounded-xl flex flex-col gap-1 hover:border-brand-500/50 transition";
+                    card.innerHTML = `
+                        <div class="flex justify-between items-center">
+                            <span class="mono font-bold text-brand-400">${p.code} - ${p.name}</span>
+                            <span class="text-[10px] px-1.5 py-0.5 bg-slate-800 text-slate-300 rounded">${p.feature}</span>
+                        </div>
+                        <div class="flex justify-between items-center text-[11px] text-slate-400 mt-1">
+                            <span>Estoque: <b class="text-white">${p.stock}</b></span>
+                            <span class="mono text-amber-300">${p.address}</span>
+                        </div>
+                    `;
+                    listContainer.appendChild(card);
+                });
+            }
+
+            // Highlight module in 3D
+            if (threeModules[modId]) {
+                highlight3DModule(modId);
+            }
+        }
+
+        function switchMainTab(tab) {
+            const btn3d = document.getElementById("tab-3d-btn");
+            const btn2d = document.getElementById("tab-2d-btn");
+            const c3d = document.getElementById("container-3d");
+            const c2d = document.getElementById("container-2d");
+
+            if (tab === '3d') {
+                c3d.classList.remove("hidden");
+                c2d.classList.add("hidden");
+                c2d.classList.remove("flex");
+                btn3d.className = "px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 bg-brand-600 text-white transition";
+                btn2d.className = "px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 text-slate-400 hover:text-white transition";
+                onWindowResize();
+            } else {
+                c3d.classList.add("hidden");
+                c2d.classList.remove("hidden");
+                c2d.classList.add("flex");
+                btn2d.className = "px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 bg-brand-600 text-white transition";
+                btn3d.className = "px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 text-slate-400 hover:text-white transition";
+            }
+        }
+
+        // ==============================================================================
+        // 3. THREE.JS 3D ENGINE & SCENE GENERATION
+        // ==============================================================================
+        let scene, camera, renderer, controls;
+        let threeModules = {};
+        let raycaster, mouse;
+        let nightMode = false;
+        let ambientLight, dirLight;
+
+        function init3D() {
+            const container = document.getElementById("container-3d");
+            const canvas = document.getElementById("canvas3d");
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0f172a);
+
+            camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
+            
+            renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.maxPolarAngle = Math.PI / 2 - 0.02; // Don't clip under floor
+
+            // Lights
+            ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+            scene.add(ambientLight);
+
+            dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(20, 30, 15);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            scene.add(dirLight);
+
+            // Raycaster for clicking
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+
+            // Build Building & Racks
+            buildWarehouseStructure();
+            buildRackModules();
+
+            // Initial Camera Position
+            setCameraView('iso');
+
+            // Events
+            window.addEventListener('resize', onWindowResize);
+            canvas.addEventListener('click', on3DCanvasClick);
+
+            // Animation Loop
+            animate();
+        }
+
+        function buildWarehouseStructure() {
+            // WAREHOUSE FLOOR (20m x 12m)
+            const floorGeo = new THREE.PlaneGeometry(20, 12);
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.8 });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            floor.position.set(10, 0, 6);
+            floor.receiveShadow = true;
+            scene.add(floor);
+
+            // Floor Grid Helper
+            const grid = new THREE.GridHelper(20, 20, 0x0ea5e9, 0x334155);
+            grid.position.set(10, 0.01, 6);
+            scene.add(grid);
+
+            // WALLS (5m height)
+            const wallMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, transparent: true, opacity: 0.4, side: THREE.DoubleSide });
+            
+            // Back Wall (Z = 12)
+            const wallBack = new THREE.Mesh(new THREE.PlaneGeometry(20, 5), wallMat);
+            wallBack.position.set(10, 2.5, 12);
+            scene.add(wallBack);
+
+            // Left Wall (X = 0)
+            const wallLeft = new THREE.Mesh(new THREE.PlaneGeometry(12, 5), wallMat);
+            wallLeft.rotation.y = Math.PI / 2;
+            wallLeft.position.set(0, 2.5, 6);
+            scene.add(wallLeft);
+
+            // DEMARCATED FLOOR ZONES
+            createFloorZone(1.5, 0.5, 3.5, 4.0, regionColors.A, "Região A");
+            createFloorZone(15.0, 0.5, 3.5, 4.0, regionColors.B, "Região B");
+            createFloorZone(1.5, 5.5, 3.5, 4.0, regionColors.C, "Região C");
+            createFloorZone(15.0, 5.5, 3.5, 4.0, regionColors.D, "Região D");
+            createFloorZone(1.5, 10.0, 17.0, 1.8, regionColors.E, "Região E");
+            createFloorZone(6.0, 0.2, 8.0, 3.8, regionColors.REC, "Recebimento / Expedição");
+        }
+
+        function createFloorZone(x, z, width, depth, colorHex, labelText) {
+            const geo = new THREE.PlaneGeometry(width, depth);
+            const mat = new THREE.MeshBasicMaterial({ color: colorHex, transparent: true, opacity: 0.25, side: THREE.DoubleSide });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.rotation.x = -Math.PI / 2;
+            mesh.position.set(x + width / 2, 0.02, z + depth / 2);
+            scene.add(mesh);
+
+            // Zone Border Line
+            const edges = new THREE.EdgesGeometry(geo);
+            const lineMat = new THREE.LineBasicMaterial({ color: colorHex, linewidth: 2 });
+            const wireframe = new THREE.LineSegments(edges, lineMat);
+            wireframe.rotation.x = -Math.PI / 2;
+            wireframe.position.set(x + width / 2, 0.03, z + depth / 2);
+            scene.add(wireframe);
+        }
+
+        function buildRackModules() {
+            modulesConfig.forEach(config => {
+                const rackGroup = new THREE.Group();
+                rackGroup.position.set(config.x, 0, config.z);
+                rackGroup.rotation.y = config.rot;
+                rackGroup.userData = { id: config.id, region: config.region };
+
+                // Rack Dimensions: Width 1.2m, Depth 0.6m, Height 3.6m (5 levels)
+                const width = 1.2;
+                const depth = 0.6;
+                const height = 3.6;
+                const levels = 5;
+
+                const metalMat = new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.6, roughness: 0.4 });
+                const shelfMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.5 });
+                const boxMat = new THREE.MeshStandardMaterial({ color: regionColors[config.region], roughness: 0.3 });
+
+                // 4 Vertical Pillars
+                const pillarGeo = new THREE.BoxGeometry(0.05, height, 0.05);
+                const p1 = new THREE.Mesh(pillarGeo, metalMat); p1.position.set(-width/2, height/2, -depth/2);
+                const p2 = new THREE.Mesh(pillarGeo, metalMat); p2.position.set(width/2, height/2, -depth/2);
+                const p3 = new THREE.Mesh(pillarGeo, metalMat); p3.position.set(-width/2, height/2, depth/2);
+                const p4 = new THREE.Mesh(pillarGeo, metalMat); p4.position.set(width/2, height/2, depth/2);
+                rackGroup.add(p1, p2, p3, p4);
+
+                // 5 Shelves Levels & Cargo Boxes
+                const shelfGeo = new THREE.BoxGeometry(width, 0.04, depth);
+                const boxGeo = new THREE.BoxGeometry(0.45, 0.35, 0.45);
+
+                for (let i = 0; i < levels; i++) {
+                    const levelY = (i * (height / levels)) + 0.2;
+                    const shelf = new THREE.Mesh(shelfGeo, shelfMat);
+                    shelf.position.set(0, levelY, 0);
+                    shelf.castShadow = true;
+                    rackGroup.add(shelf);
+
+                    // Add Cargo Boxes on levels
+                    if (i < 4) {
+                        const box1 = new THREE.Mesh(boxGeo, boxMat);
+                        box1.position.set(-0.28, levelY + 0.2, 0);
+                        box1.castShadow = true;
+
+                        const box2 = new THREE.Mesh(boxGeo, boxMat);
+                        box2.position.set(0.28, levelY + 0.2, 0);
+                        box2.castShadow = true;
+
+                        rackGroup.add(box1, box2);
+                    }
+                }
+
+                scene.add(rackGroup);
+                threeModules[config.id] = rackGroup;
+            });
+        }
+
+        function highlight3DModule(modId) {
+            // Reset all opacity
+            Object.keys(threeModules).forEach(id => {
+                threeModules[id].traverse(child => {
+                    if (child.isMesh) {
+                        child.material.transparent = false;
+                        child.material.opacity = 1.0;
+                    }
+                });
+            });
+
+            // Focus camera on selected rack
+            const targetMod = threeModules[modId];
+            if (targetMod) {
+                const p = targetMod.position;
+                controls.target.set(p.x, 1.8, p.z);
+            }
+        }
+
+        function filter3DZone(zone) {
+            Object.keys(threeModules).forEach(id => {
+                const mod = threeModules[id];
+                if (zone === 'all' || mod.userData.region === zone) {
+                    mod.visible = true;
+                } else {
+                    mod.visible = false;
+                }
+            });
+        }
+
+        function setCameraView(type) {
+            if (type === 'iso') {
+                camera.position.set(-5, 15, 22);
+                controls.target.set(10, 0, 6);
+            } else if (type === 'top') {
+                camera.position.set(10, 24, 6.01);
+                controls.target.set(10, 0, 6);
+            } else if (type === 'front') {
+                camera.position.set(10, 3, -8);
+                controls.target.set(10, 2, 6);
+            }
+            controls.update();
+        }
+
+        function toggleNightMode() {
+            nightMode = !nightMode;
+            if (nightMode) {
+                scene.background = new THREE.Color(0x020617);
+                ambientLight.intensity = 0.2;
+                dirLight.intensity = 0.3;
+            } else {
+                scene.background = new THREE.Color(0x0f172a);
+                ambientLight.intensity = 0.7;
+                dirLight.intensity = 0.8;
+            }
+        }
+
+        function on3DCanvasClick(event) {
+            const rect = renderer.domElement.getBoundingClientRect();
+            mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+
+            const intersects = raycaster.intersectObjects(scene.children, true);
+            for (let i = 0; i < intersects.length; i++) {
+                let obj = intersects[i].object;
+                while (obj.parent && obj.parent !== scene) {
+                    if (obj.userData && obj.userData.id) {
+                        selectModule(obj.userData.id);
+                        return;
+                    }
+                    obj = obj.parent;
+                }
+            }
+        }
+
+        function onWindowResize() {
+            const container = document.getElementById("container-3d");
+            if (!container || container.clientWidth === 0) return;
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // ==============================================================================
+        // 4. INITIALIZATION ON LOAD
+        // ==============================================================================
+        window.addEventListener('DOMContentLoaded', () => {
+            renderTable();
+            selectModule('A01');
+            init3D();
+        });
+    </script>
+</body>
+</html>
